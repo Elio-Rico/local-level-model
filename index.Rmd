@@ -1,0 +1,908 @@
+---
+title: Local Level Model
+author: admin
+date: '2021-07-01'
+summary: 'In this short project, we present some exercices regarding the Local Level Model. We apply the Kalman filter to simulated data and illustarte the pile-up problem that may occur for maximum likelihood estimation and small sample size.'
+slug: []
+categories:
+tags:
+  - Macroeconometrics
+  - Local Level Model
+  - Kalman Filter
+links:
+- icon: twitter
+  icon_pack: fab
+  name: Follow
+  url: https://twitter.com/georgecushen
+slides: ""
+math: true
+description: Description for the page
+bibliography: [bibliography.bib]
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, fig.height = 4, warning = FALSE, out.width = "100%"
+)
+
+if (!require("ggplot2")) {install.packages("ggplot2"); library('ggplot2')}
+if (!require("tidyverse")) {install.packages("tidyverse"); library('tidyverse')}
+if (!require("matrixStats")) {install.packages("matrixStats"); library('matrixStats')}
+if (!require("tidymodels")) {install.packages("tidymodels"); library('tidymodels')}
+if (!require("lme4")) {install.packages("lme4"); library('lme4')}
+if (!require("haven")) {install.packages("haven"); library('haven')}
+if (!require("miceadds")) {install.packages("miceadds"); library('miceadds')}
+if (!require("rmarkdown")) {install.packages("rmarkdown"); library('rmarkdown')}
+if (!require("reshape2")) {install.packages("reshape2"); library('reshape2')}
+if (!require("plotly")) {install.packages("plotly"); library('plotly')}
+if (!require("knitr")) {install.packages("knitr"); library('knitr')}
+if (!require("kableExtra")) {install.packages("kableExtra"); library('kableExtra')}
+if (!require("htmltools")) {install.packages("htmltools"); library('htmltools')}
+```
+
+
+```{r}
+# Move this css tag outside the chunk to control the width of text
+# on the page.
+# <style type="text/css">
+# .main-container {
+#   max-width: 1000px;
+#   margin-left: auto;
+#   margin-right: auto;
+# }
+# </style>
+```
+
+# Preliminaries
+
+Please note that the plots are displayed without any problem in Safari, but with certain browsers and editions of chrome, firefox and edge plots might appear empty.
+
+
+In this short project, we will apply and discuss some properties of the local level model. First, we use simulated time series to apply the Kalman Filter. Second, we discuss the properties of the Maximum Likelihood Estimator (MLE) in a small Monte Carlo simulation exercise. Within this framework, we will also analyze the pile-up problem of the MLE estimator.
+
+
+# Local Level Model
+
+The Local Level Model is based on two equations, namely the measurement equation and the transition (or state) equation. The measurement equation represents a noisy signal that is observed by the agent. The true underlying data generation process in the form of the transition equation is not directly observed by the agent. An example for this framework could be as follows. When professional analysts have to forecast GDP, they might not observe a perfect signal of GDP - presumably, the data they observe contains some measurement inaccuracies. Often, the GDP data is subject to continuous revisions in the first few quarters after the first publication of the data. Using this noisy signal of GDP, the forecasters then try to "filter out" the noise in an optimal way to forecast GDP according their assumption of the underlying data generating process. 
+
+
+The framework of an exemplary Local Level Model is presented below.
+\begin{align*}
+  &  \text{Measurement Equation: }   y_t = \mu_t + \varepsilon_t,  \varepsilon_t \sim\left(0, \sigma_\varepsilon^2 \right)\\
+  &  \text{Transition Equation: }   \mu_{t+1} = \mu_t + \eta_t,  \eta_t \sim\left(0, \sigma_\eta^2 \right)\\
+\end{align*}
+Note that this framework could be easily extended to a case where the agents receive multiple signals, observe different exogenous variables, allow for covariances among the noises in the measurement and transition equation, etc. Also, we consider here the special case where the transition equation follows a random walk process. Coming back to the example from above, the agent is interested in guessing the distribution of the underlying data generating process, given his observations of the time series $Y_t = y_1, y_2, \dots, y_T$, and using this signal to predict the future outcome. Therefore, we are interested in the distribution of the predicted signal density $f(\mu_{t+1}|Y_t) \equiv N \left( a_{t+1} , p_{t+1}\right)$ (as all the noise is normal, the predicted signal will also be normally distributed). $a_{t+1}$ is simple the conditional expectation of the future outcome of $\mu_t$ (GDP forecast in the next quarter):
+$$
+a_{t+1} = \mathbb{E}(\mu_{t+1} | Y_t) = \mathbb{E}( \mu_t + \eta_t| Y_t) = a_{t|t}
+$$
+where $a_{t|t}$ is simply the result of the Kalman filter. Note that for a transition equation with  $\mu_{t+1} = \rho \mu_t + \eta_t, \rho < 1$, $a_{t+1}= \rho a_{t|t}$. Further, we have that 
+$$
+p_{t+1} = \mathbb{V}(\mu_t + \eta_t| Y_t) =  p_{t|t} + \sigma_\eta^2
+$$
+Now, one can show that the result of the signal extraction (Kalman Filter) can be obtained by recursively solving the following system of equations (given a starting value for $a_1$ and $p_1$).
+\begin{align*}
+  & v_t         = y_t - a_t \\
+  & k_t         = \frac{p_t}{p_t + \sigma_{\varepsilon}^2} \\
+  & a_{t|t}     = a_t + k_t v_t \\
+  & p_{t|t}     = k_t \sigma_{\varepsilon}^2  \\
+  & a_{t+1}     = a_{t|t} \\
+  & p_{t+1}     = p_{t|t} + \sigma_{\eta}^2
+\end{align*}
+Given some starting values, we are now ready to calculate the Kalman Fitler and the predicted signal. Note that we also define $f_t = p_t + \sigma_{\varepsilon}^2$.
+
+
+# Kalman Filter
+
+In this section, we simply simulate several time series with different parameter values. In detail, we  use the model set-up described above together with initial conditions of $\mu_1 \sim N (a_1 = 0, p_1 = 10^7)$ and variances $\sigma_{\varepsilon}^2 = 1$ and $\sigma_{\eta}^2 = q$ with $q\in \{10,1,0.1,0.001\}$.
+
+
+```{r, include = FALSE}
+# clear variables:
+rm(list=ls(all=TRUE))
+set.seed(10)
+
+# Simulate all time series
+# ------------------------
+
+# Initial conditions
+a1 <- 0
+p1 <- 10^7
+
+# Starting value for mu
+mu.t <- c()
+mu.t[1] <- rnorm(1,a1,sqrt(p1))
+
+# Different variances for eta
+q <- c(10,1,0.1,0.001)
+
+# Other parameters
+var.vareps <- 1
+rho <- 1
+t <- 100
+
+
+# State/Transition Equation: Data Generating Process "x": AR(1) process 
+# ______________________________________________________________________
+
+# Pre-allocate dataframe
+df.ts <- data.frame(matrix(NA,nrow = t*(NROW(q)), ncol = 4))
+colnames(df.ts) <- c("t","q","y.t","mu.t")
+
+x <- 1
+for(var in q){
+  
+  
+  # DATA GENERATING PROCESS (TRANSITION EQUATION)
+  for(i in 2:t){
+    mu.t[i] = mu.t[i-1] + rnorm(mean = 0, sd = sqrt(var), n = 1)
+  }
+
+  # NOISY SIGNAL OBSERVED (MEASUREMENT EQUATION)
+  y.t <- c()
+  for(i in 1:t){
+    y.t[i] = mu.t[i] + rnorm(mean = 0, sd = 1, n = 1)
+  }
+ 
+  # indexes for dataframe in long format
+  i1 <- 1 + (t*(x-1))
+  i2 <- t*x
+  
+  df.ts[i1:i2,] <- cbind(c(1:t),rep(var,t),y.t,mu.t)
+  
+  x <- x + 1
+}
+
+# put df in long format
+df.ts.l <- df.ts %>%
+  gather(key = key, value = value, y.t:mu.t,-t)
+
+# Plot the different time series
+figures <- c()
+
+x <- 1
+for(var in q){
+  
+  if(x < NROW(q)){
+    bin <- F
+  } else {
+    bin <- T
+  }
+  
+  fig <- df.ts.l %>%
+      dplyr::filter(q == var) %>%
+      print(var) %>%
+      plot_ly(.,.x = ~t,y = ~value,color = ~key, type = "scatter",mode = "lines",legendgroup = ~key, showlegend = bin, colors = c("#003f5c","#ff6361"), linetype = ~key) 
+  
+  xtitle <- paste('t <br> q =',var)
+  fig <- fig %>% layout(title=TeX(" \\text{Actual Data } \\mu_t \\text{ and Observed Noisy Signal }  y_t "), xaxis = list(title = xtitle)) 
+  
+  figures[x] <- fig   
+  x <- x + 1
+}
+
+
+plot <- subplot(figures, nrows = 1, shareX = T, shareY = T)  %>% 
+      config(mathjax = 'cdn')
+```
+
+Note that we simulated ``r t`` time periods.
+```{r, echo = FALSE}
+plot
+```
+
+For the Kalman Filter that we will calculate below, a parameter of interest is the signal-to-noise ratio. This ratio is defined given by $\frac{\sigma_\eta^2}{\sigma_\varepsilon^2}$. In our example above, the variance of the data the agent observes, $\sigma_\varepsilon^2$, is fixed to 1. However, the variance of the data generating process, $\sigma_\eta^2$, varies. As $\sigma_\varepsilon^2$ is fixed to 1, $q$ directly indicates the signal-to-noise ratio. The higher this ratio is, the more of the variation the agent observes in the time series $y_t$ actually stemms from variations in the true data generating process. In that sense, the signal observed is very informative about the true data generating process. In other words, the signal $y_t$ observed is a very good indicator of the true $mu_t$. This is represented in the graph - The higher the signal-to-noise ratio, the closer the two time series are. Consequently, the more informative the signal observed by the agent is about the $mu_t$.
+
+
+Using the generated time series of the signal, we can now calculate the Kalman filter as described below. The code snippet is attached as well.
+
+```{r, echo = TRUE}
+
+KF <- data.frame(matrix(NA,nrow = t*(NROW(q)), ncol = 9))
+colnames(KF) <- c("v.t","k.t","a.t.t","p.t.t","a.t","p.t","y.t","q","t")
+
+x <- 1
+for (i in q){
+  
+  Y.t <- df.ts %>%
+    dplyr::filter(q == i) %>%
+    dplyr::select(y.t) %>%
+    unlist(.)
+  
+  Mu.t <- df.ts %>%
+    dplyr::filter(q == i) %>%
+    dplyr::select(mu.t) %>%
+    unlist(.)
+  
+  # var eta
+  var.eta <- i
+  
+  # Allocation
+  A.t <- rep(0, t)
+  P.t <- rep(0, t)
+  V.t  <- rep(0, t)
+  A.t.t <- rep(0, t)
+  P.t.t <- rep(0, t)
+  K.t     <- rep(0, t)
+  
+  # Initialization:
+  # A.t already initiliazed with 0
+  P.t[1] <- var.vareps*10^7
+  
+  for (j in 2:(t)){
+
+    V.t[j] <- Y.t[j] - A.t[j-1]
+    K.t[j] <- P.t[j-1]/(P.t[j-1] + var.vareps)
+    A.t.t[j] <- A.t[j-1] + K.t[j] * V.t[j]
+    P.t.t[j] <- K.t[j] * var.vareps
+    
+    A.t[j] <- A.t.t[j]
+    P.t[j] <- P.t.t[j] + var.eta
+    
+  }
+  
+  # indexes for dataframe
+  i1 <- 1 + (t*(x-1))
+  i2 <- t*x
+    
+  temp <- cbind(V.t,K.t,A.t.t,P.t.t,A.t,P.t,Y.t,i,c(1:t))
+  rownames(temp) <- NULL
+  
+  x <- x + 1
+  
+  KF[i1:i2,] <- temp
+  
+}
+```
+
+We plot below the filtered series $a_{t|t}$ versus the observed time series $y_t$.
+
+```{r, include = FALSE}
+# put df in long format
+KF.l <- KF %>%
+  gather(key = key, value = value, v.t:y.t,-t)
+
+# Plot the different time series
+figures <- c()
+
+x <- 1
+for(var in q){
+  
+  if(x < NROW(q)){
+    bin <- F
+  } else {
+    bin <- T
+  }
+  
+  fig <- KF.l %>%
+      dplyr::filter(q == var, key == "y.t" | key == "a.t",t > 2) %>%
+      print(var) %>%
+      plot_ly(.,.x = ~t,y = ~value,color = ~key, type = "scatter",mode = "lines",legendgroup = ~key, showlegend = bin, colors = c("#ffa600","#ff6361"), linetype = ~key) 
+  
+  xtitle <- paste('t <br> q =',var)
+  fig <- fig %>% layout(title=TeX(" \\text{Observed Data } y_t \\text{ and Filtered Data }  a_{t|t} "), xaxis = list(title = xtitle)) 
+  
+  figures[x] <- fig   
+  x <- x + 1
+}
+
+
+plot <- subplot(figures, nrows = 1, shareX = T, shareY = T)  %>% 
+      config(mathjax = 'cdn')
+
+```
+
+
+```{r}
+plot
+```
+
+
+Moreover, we can plot the Kalman gain. The higher the Kalman gain, the faster the expectation adjusts to the noise and therefore the more abrupt the filtered series will adjust. The Kalman gain is also higher for higher signal-to-noise ratios. Hence, the higher the Kalman gain, the faster the adaption and the more weight will be given to recent observations. Also, the higher the share of the noise, the longer it takes for the Kalman gain to converge, as it can be seen from the plot below.
+
+
+
+
+```{r, include = FALSE}
+
+# Plot the different time series
+figures <- c()
+
+x <- 1
+for(var in q){
+  
+  if(x < NROW(q)){
+    bin <- F
+  } else {
+    bin <- T
+  }
+  
+  fig <- KF.l %>%
+      dplyr::filter(q == var, key == "k.t" ,t > 2) %>%
+      print(var) %>%
+      plot_ly(.,.x = ~t,y = ~value,color = ~key, type = "scatter",mode = "lines",legendgroup = ~key, showlegend = bin, colors = c("#0e8f62"), linetype = ~key) 
+  
+  xtitle <- paste('t <br> q =',var)
+  fig <- fig %>% layout(title=TeX(" \\text{Kalman Gain } k_t  "), xaxis = list(title = xtitle)) 
+  
+  figures[x] <- fig   
+  x <- x + 1
+}
+
+
+plot <- subplot(figures, nrows = 1, shareX = T, shareY = T)  %>% 
+      config(mathjax = 'cdn')
+
+```
+
+
+```{r}
+plot
+```
+
+
+# Monte Carlo Simulation
+
+In a next exercise, we simulate 100 time series for each value of $q$ of different lengths, namely $T=50,100,200,1000$ (for the data generating process and the observed signal). Then, we estimate the two variance parameters using maximum likelihood (ML). Finally, we will analyze the properties of the ML estimators and discuss the pile-up problem. Note that, with the optimization algorithm used in this exercise, the estimated variance turned out to be negative. To avoid such results, we expressed everything in standard deviations in the code below.
+
+```{r, echo = FALSE}
+
+sim.data = function(length.series, number.sims,variances){
+  # Function to simulate the Transition and Measurement Equation for different variances.
+  # length.series refers to the number of time periods for each series. number.sims refers to the number of series generated.
+  # Variances refer to a vector of variances for the Transition Equation (true data generating process)
+  
+  output <- list()
+  
+  # Initial conditions
+  a1 <- 0
+  p1 <- 10^7
+
+  # Starting value for mu
+  mu.t <- c()
+  mu.t[1] <- rnorm(1,a1,sqrt(p1))
+
+  df.series <- data.frame(matrix(NA,nrow = length.series, ncol = 5))
+  ts <- data.frame()
+  
+  for(var in variances){
+    
+    all.mu <- data.frame(t=1:length.series,q = var)
+    all.y <- data.frame(t=1:length.series,q = var)
+  
+    for(sim.quant in 1:number.sims){ # number of time series generated
+      
+      # DATA GENERATING PROCESS (TRANSITION EQUATION)
+      for(i in c(2:length.series)){
+        mu.t[i] = mu.t[i-1] + rnorm(mean = 0, sd = sqrt(var), n = 1)
+      }
+      
+      # NOISY SIGNAL OBSERVED (MEASUREMENT EQUATION)
+      y.t <- c()
+      for(i in 1:length.series){
+        y.t[i] = mu.t[i] + rnorm(mean = 0, sd = 1, n = 1)
+      }
+      
+      all.mu <- cbind(all.mu, mu.t)
+      all.y <- cbind(all.y, y.t)
+
+      colnames(all.mu)[sim.quant+2] = sim.quant
+      colnames(all.y)[sim.quant+2] = sim.quant
+     
+    } 
+  
+    list.oneq <- list(as.list(all.mu),as.list(all.y))
+    names(list.oneq) <- c("mu","y")
+    
+    output[[length(output)+1]] <- list.oneq
+  
+  }
+  
+  names(output) = paste0("q=",variances)
+  
+  return(output)
+}
+
+```
+
+
+
+Below, we plot the 100 different series  of length $T=100$ for $y$, the true data generating process, once with variance $q=0.1$ and once with variance $q=0.001$. The signals therefore correspond to these series plus the noise.
+
+```{r, echo = FALSE}
+# All series
+data.50 <- sim.data(50, 100,q)
+data.100 <- sim.data(100, 100,q)
+data.200 <- sim.data(200, 100,q)
+data.1000 <- sim.data(1000, 100,q)
+
+# PLOT DATA GENEARTING PROCESS FOR Q = 0.001 AND Q = 10 FOR T=100:
+t1 <- data.100$`q=0.1`$mu
+t2 <- data.100$`q=0.001`$mu
+
+
+figures <- c()
+
+#colors = c("#003f5c","#ff6361")
+
+fig1 <- do.call(cbind.data.frame, t1) %>%
+    dplyr::select(-q)   %>% 
+    gather(key=key,value=value,-t) %>% 
+    group_by(key) %>% 
+    plot_ly(.,.x = ~t,y = ~value,color = ~key, type = "scatter",mode = "lines",legendgroup = ~key, showlegend = F, colors = c("#003f5c")) 
+  
+  xtitle <- paste('t <br> q =',t1$q[1])
+    fig1 <- fig1 %>% layout(title="Simulated Series", xaxis = list(title = xtitle), yaxis = list(title = "Value")) 
+ 
+    
+fig2 <-do.call(cbind.data.frame, t2) %>%
+    dplyr::select(-q)   %>% 
+    gather(key=key,value=value,-t) %>% 
+    group_by(key) %>% 
+    plot_ly(.,.x = ~t,y = ~value,color = ~key, type = "scatter",mode = "lines",legendgroup = ~key, showlegend = F, colors = c("#003f5c")) 
+
+  xtitle <- paste('t <br> q =',t2$q[1])
+    fig2 <- fig2 %>% layout(title=TeX(" \\text{Simulated Time Series for Transition Equation } \\mu_t  "), xaxis = list(title = xtitle), yaxis = list(title = "Value")) 
+
+figures[1] <- fig1
+figures[2] <- fig2
+
+
+plot <- subplot(figures, nrows = 1, shareX = T, shareY = T)  %>% 
+      config(mathjax = 'cdn')
+
+```
+
+
+```{r}
+plot
+```
+
+Next, we create a function to estimate the Kalman Filter that takes as input the signals generated for each variance $q$ and the dataframes of different lenghts regarding the time dimension. Note that we use the standard deviations of $\varepsilon$ and $\eta$ instead of the variances as input. This is due to the optimization procedure. It has produced more stable results and squaring the standard deviation guarantees positive variance.
+
+```{r,echo = TRUE}
+
+Kalman.Filter.sd <- function(y.t,sd.vareps,sd.eta){
+  # As input, signal y.t is needed and the variances of the noise in the transition and measurement equation
+  t <- length(y.t)
+  
+  # Allocation
+  df.KF <- c()
+  a.t <- rep(0, t)
+  p.t <- rep(0, t)
+  v.t  <- rep(0, t)
+  a.t.t <- rep(0, t)
+  p.t.t <- rep(0, t)
+  k.t     <- rep(0, t)
+  f.t     <- rep(0, t)
+  
+  # Initialization:
+  # A.t already initiliazed with 0
+  p.t[1] <- (sd.vareps)^2*10^7
+  
+  for (j in c(2:t)){
+
+    v.t[j] <- y.t[j] - a.t[j-1]
+    k.t[j] <- p.t[j-1]/(p.t[j-1] + (sd.vareps)^2)
+    a.t.t[j] <- a.t[j-1] + k.t[j] * v.t[j]
+    p.t.t[j] <- k.t[j] * (sd.vareps)^2
+    
+    # For log-likelihood:
+    f.t[j] <- (p.t[j-1] + (sd.vareps)^2)
+    
+    # update
+    a.t[j] <- a.t.t[j]
+    p.t[j] <- p.t.t[j] + sd.eta^2
+    
+  }
+  
+  var.eta <- sd.eta^2
+  
+  temp <- cbind(v.t,k.t,a.t.t,p.t.t,a.t,p.t,f.t,y.t,var.eta,c(0:(t-1))) # we discard the initial observation 
+  rownames(temp) <- NULL
+  
+  df.KF<- as.data.frame(temp[2:t,] )
+  
+  return(df.KF)
+  
+} 
+
+```
+
+We also have to define the log likelihood function which we use to estimate the variances (or here, standard deviations, $\theta$) in our simulated data. The log-likelihood function of the Kalman Filter is given as
+$$
+\text{log} L^{KF}(\theta) = -\frac{n}{2}\ln(2\pi) -\frac{1}{2}\sum_{t=2}^n \ln(f_t) - \sum_{t=2}^n \frac{v_t^2}{f_t}
+$$
+
+The function can be coded as shown below in R.
+```{r, echo = TRUE}
+
+Log.Lik.sd <- function(thetas){
+  # The function takes as inputs the guesses for the standard deviations of eta and varepsilon. With these guesses, it calculates the maximum likelihood.
+  
+  df.KF <- Kalman.Filter.sd(y.t, thetas[1], thetas[2]) 
+  
+  log.lik <- -0.5*(NROW(df.KF))*log(2*pi) - 0.5 * sum(log(df.KF$f.t),na.rm=T) - 0.5 * sum((df.KF$v.t^2)/(df.KF$f.t), na.rm = T)
+  
+  return(-log.lik)
+}
+
+
+
+```
+
+
+We then estimate the standard deviations for the four different sample sizes and plot the distribution of the 100 variances for every sample size and signal-to-noise ratio $q$ below.
+
+```{r}
+# prepare the array to store all estimated thetas:
+sample.sizes <- c(50,100,200,1000)
+number.simulations <- 100
+number.diff.sample.sizes <- length(sample.sizes)
+thetas.mle = array(NA, dim <- c(number.simulations,2,number.diff.sample.sizes)) # creates a 3-dim array to store, for each simulated series, the estimated values of the two tetas, for all different sample sizes
+```
+
+
+
+```{r, include = FALSE, echo = FALSE}
+
+
+# STANDARD DEVIATION
+var.index <- 1
+for(i in c(1:number.diff.sample.sizes)){
+  
+  # Simulate the data for a given variance and the number of time series simulated: loop through the sample sizes
+  temp <- sim.data(sample.sizes[i], number.simulations, q[var.index])$`q=10`$y
+  
+  # loop through every simulation generated (note that index 1 and 2 belong to indicators for the time and the variance - hence, start index from 3 to n.s + 2)
+  for(index in 3:(number.simulations+2)){
+    
+    y.t <- temp[[index]]
+  
+    estimates <- stats::optim(fn = Log.Lik.sd, par = c(1,sqrt(10)))$par
+  
+    thetas.mle[index-2,,i] <- estimates
+  
+  }
+  
+#  print(i)
+  
+}
+
+
+
+# Signal To Noise Ratio: var.eta/var.vareps
+df.50 <- as.data.frame(thetas.mle[,,1])  %>% 
+  mutate(trueq = q[var.index]/var.vareps) %>%
+  mutate(q = V2^2/V1^2) 
+  
+df.100 <- as.data.frame(thetas.mle[,,2])  %>% 
+  mutate(trueq = q[var.index]/var.vareps) %>%
+  mutate(q = V2^2/V1^2)
+
+df.200 <- as.data.frame(thetas.mle[,,3])  %>% 
+  mutate(trueq = q[var.index]/var.vareps) %>%
+  mutate(q = V2^2/V1^2) 
+
+df.1000 <- as.data.frame(thetas.mle[,,4])  %>% 
+  mutate(trueq = q[var.index]/var.vareps) %>%
+  mutate(q = V2^2/V1^2) 
+
+```
+
+
+```{r, include = FALSE, echo = FALSE}
+
+
+
+# To build the plot_ly plot with the same outcome as ggplot, we extract the data used in ggplot and then use it for an interactive plotly chart
+m <- ggplot() +
+  geom_density(data = df.1000, aes(x=q, color = 'n=1000')) +
+  geom_density(data = df.200, aes(x=q, color = 'n=200')) +
+  geom_density(data = df.100, aes(x=q,color = 'n=100')) +
+  geom_density(data = df.50, aes(x=q,color = 'n=50')) +
+  xlim(c(0,20))
+data.plot <- ggplot_build(m)  
+
+plot.df.1000 <- data.frame(x=data.plot$data[[1]]$x,y=data.plot$data[[1]]$y)
+plot.df.200 <- data.frame(x=data.plot$data[[2]]$x,y=data.plot$data[[2]]$y)
+plot.df.100 <- data.frame(x=data.plot$data[[3]]$x,y=data.plot$data[[3]]$y)
+plot.df.50 <- data.frame(x=data.plot$data[[4]]$x,y=data.plot$data[[4]]$y)
+
+```
+
+
+```{r, include = FALSE, echo = FALSE}
+vline <- function(x = 0, color = "black") {
+  list(
+    type = "line", 
+    y0 = 0, 
+    y1 = 1, 
+    yref = "paper",
+    x0 = x, 
+    x1 = x, 
+    line = list(color = color)
+  )
+}
+
+
+figures <- c()
+
+fig <- plot_ly(x = ~plot.df.1000$x, y = ~plot.df.1000$y, type = 'scatter', mode = 'lines', name = 'T=1000',
+        line = list(color = "#6F4E7C") ,fill = 'tozeroy' , fillcolor= list(color = "#6F4E7C") )
+fig <- fig %>% add_trace(x = ~plot.df.200$x, y = ~plot.df.200$y, name = 'T=200',line = list(color = "#CA472F"))
+fig <- fig %>% add_trace(x = ~plot.df.100$x, y = ~plot.df.100$y, name = 'T=100',line = list(color = "#0B84A5"))
+fig <- fig %>% add_trace(x = ~plot.df.50$x, y = ~plot.df.50$y, name = 'T=50',line = list(color = "#F6C85F"))
+fig <- fig %>% layout(title = "Distribution of Signal-to-Noise Ratio by MLE", xaxis = list(title = 'q = 10'),
+         yaxis = list(title = 'Density')) 
+fig <- fig %>%
+  layout(shapes = list(vline(10)))
+# 
+# fig <- fig %>% add_annotations(
+#     x= 14,
+#     y= 0.17,
+#     xref = "x",
+#     yref = "y",
+#     text = "<b>True Value q = 10 </b>",
+#     showarrow = T,
+#     ax= 15,
+#     ay= 0.15,
+#     axref = "x",
+#     ayref = "y"
+#   )
+
+figures[1] <- fig
+
+fig
+
+```
+
+
+```{r}
+fig
+```
+
+
+
+
+
+```{r, include = FALSE, echo = FALSE}
+
+var.index <- 2
+for(i in c(1:number.diff.sample.sizes)){
+  
+  # Simulate the data for a given variance and the number of time series simulated: loop through the sample sizes
+  temp <- sim.data(sample.sizes[i], number.simulations, q[var.index])$`q=1`$y
+  
+  # loop through every simulation generated (note that index 1 and 2 belong to indicators for the time and the variance - hence, start index from 3 to n.s + 2)
+  for(index in 3:(number.simulations+2)){
+    
+    y.t <- temp[[index]]
+  
+    estimates <- stats::optim(fn = Log.Lik.sd, par = c(1,sqrt(1)))$par
+  
+    thetas.mle[index-2,,i] <- estimates
+  
+  }
+  
+#  print(i)
+  
+}
+
+
+# Signal To Noise Ratio: var.eta/var.vareps
+df.50 <- as.data.frame(thetas.mle[,,1])  %>% 
+  mutate(trueq = q[var.index]/var.vareps) %>%
+  mutate(q = V2^2/V1^2) 
+  
+df.100 <- as.data.frame(thetas.mle[,,2])  %>% 
+  mutate(trueq = q[var.index]/var.vareps) %>%
+  mutate(q = V2^2/V1^2)
+
+df.200 <- as.data.frame(thetas.mle[,,3])  %>% 
+  mutate(trueq = q[var.index]/var.vareps) %>%
+  mutate(q = V2^2/V1^2) 
+
+df.1000 <- as.data.frame(thetas.mle[,,4])  %>% 
+  mutate(trueq = q[var.index]/var.vareps) %>%
+  mutate(q = V2^2/V1^2) 
+
+
+m <- ggplot() +
+  geom_density(data = df.1000, aes(x=q, color = 'n=1000')) +
+  geom_density(data = df.200, aes(x=q, color = 'n=200')) +
+  geom_density(data = df.100, aes(x=q,color = 'n=100')) +
+  geom_density(data = df.50, aes(x=q,color = 'n=50')) +
+  xlim(c(0,5))
+data.plot <- ggplot_build(m)  
+
+plot.df.1000 <- data.frame(x=data.plot$data[[1]]$x,y=data.plot$data[[1]]$y)
+plot.df.200 <- data.frame(x=data.plot$data[[2]]$x,y=data.plot$data[[2]]$y)
+plot.df.100 <- data.frame(x=data.plot$data[[3]]$x,y=data.plot$data[[3]]$y)
+plot.df.50 <- data.frame(x=data.plot$data[[4]]$x,y=data.plot$data[[4]]$y)
+
+
+fig <- plot_ly(x = ~plot.df.1000$x, y = ~plot.df.1000$y, type = 'scatter', mode = 'lines', name = 'T=1000',
+        line = list(color = "#6F4E7C") ,fill = 'tozeroy' , fillcolor= list(color = "#6F4E7C") )
+fig <- fig %>% add_trace(x = ~plot.df.200$x, y = ~plot.df.200$y, name = 'T=200',line = list(color = "#CA472F"))
+fig <- fig %>% add_trace(x = ~plot.df.100$x, y = ~plot.df.100$y, name = 'T=100',line = list(color = "#0B84A5"))
+fig <- fig %>% add_trace(x = ~plot.df.50$x, y = ~plot.df.50$y, name = 'T=50',line = list(color = "#F6C85F"))
+fig <- fig %>% layout(title = "Distribution of Signal-to-Noise Ratio by MLE", xaxis = list(title = 'q = 1'),
+         yaxis = list(title = 'Density')) 
+fig <- fig %>%
+  layout(shapes = list(vline(1)))
+
+figures[2] <- fig
+
+```
+
+```{r}
+fig
+```
+
+
+
+
+
+```{r, include = FALSE, echo = FALSE}
+
+var.index <- 3
+for(i in c(1:number.diff.sample.sizes)){
+  
+  # Simulate the data for a given variance and the number of time series simulated: loop through the sample sizes
+  temp <- sim.data(sample.sizes[i], number.simulations, q[var.index])$`q=0.1`$y
+  
+  # loop through every simulation generated (note that index 1 and 2 belong to indicators for the time and the variance - hence, start index from 3 to n.s + 2)
+  for(index in 3:(number.simulations+2)){
+    
+    y.t <- temp[[index]]
+  
+    estimates <- stats::optim(fn = Log.Lik.sd, par = c(1,sqrt(1)))$par
+  
+    thetas.mle[index-2,,i] <- estimates
+  
+  }
+  
+#  print(i)
+  
+}
+
+
+# Signal To Noise Ratio: var.eta/var.vareps
+df.50 <- as.data.frame(thetas.mle[,,1])  %>% 
+  mutate(trueq = q[var.index]/var.vareps) %>%
+  mutate(q = V2^2/V1^2) 
+  
+df.100 <- as.data.frame(thetas.mle[,,2])  %>% 
+  mutate(trueq = q[var.index]/var.vareps) %>%
+  mutate(q = V2^2/V1^2)
+
+df.200 <- as.data.frame(thetas.mle[,,3])  %>% 
+  mutate(trueq = q[var.index]/var.vareps) %>%
+  mutate(q = V2^2/V1^2) 
+
+df.1000 <- as.data.frame(thetas.mle[,,4])  %>% 
+  mutate(trueq = q[var.index]/var.vareps) %>%
+  mutate(q = V2^2/V1^2) 
+
+
+m <- ggplot() +
+  geom_density(data = df.1000, aes(x=q, color = 'n=1000')) +
+  geom_density(data = df.200, aes(x=q, color = 'n=200')) +
+  geom_density(data = df.100, aes(x=q,color = 'n=100')) +
+  geom_density(data = df.50, aes(x=q,color = 'n=50')) +
+  xlim(c(0,0.5))
+data.plot <- ggplot_build(m)  
+
+plot.df.1000 <- data.frame(x=data.plot$data[[1]]$x,y=data.plot$data[[1]]$y)
+plot.df.200 <- data.frame(x=data.plot$data[[2]]$x,y=data.plot$data[[2]]$y)
+plot.df.100 <- data.frame(x=data.plot$data[[3]]$x,y=data.plot$data[[3]]$y)
+plot.df.50 <- data.frame(x=data.plot$data[[4]]$x,y=data.plot$data[[4]]$y)
+
+
+fig <- plot_ly(x = ~plot.df.1000$x, y = ~plot.df.1000$y, type = 'scatter', mode = 'lines', name = 'T=1000',
+        line = list(color = "#6F4E7C") ,fill = 'tozeroy' , fillcolor= list(color = "#6F4E7C") )
+fig <- fig %>% add_trace(x = ~plot.df.200$x, y = ~plot.df.200$y, name = 'T=200',line = list(color = "#CA472F"))
+fig <- fig %>% add_trace(x = ~plot.df.100$x, y = ~plot.df.100$y, name = 'T=100',line = list(color = "#0B84A5"))
+fig <- fig %>% add_trace(x = ~plot.df.50$x, y = ~plot.df.50$y, name = 'T=50',line = list(color = "#F6C85F"))
+fig <- fig %>% layout(title = "Distribution of Signal-to-Noise Ratio by MLE", xaxis = list(title = 'q = 0.1'),
+         yaxis = list(title = 'Density')) 
+fig <- fig %>%
+  layout(shapes = list(vline(0.1)))
+
+
+figures[3] <- fig
+
+
+```
+
+```{r}
+fig
+```
+
+
+
+
+
+
+
+```{r, include = FALSE, echo = FALSE}
+
+var.index <- 4
+for(i in c(1:number.diff.sample.sizes)){
+  
+  # Simulate the data for a given variance and the number of time series simulated: loop through the sample sizes
+  temp <- sim.data(sample.sizes[i], number.simulations, q[var.index])$`q=0.001`$y
+  
+  # loop through every simulation generated (note that index 1 and 2 belong to indicators for the time and the variance - hence, start index from 3 to n.s + 2)
+  for(index in 3:(number.simulations+2)){
+    
+    y.t <- temp[[index]]
+  
+    estimates <- stats::optim(fn = Log.Lik.sd, par = c(1,sqrt(0.001)))$par
+  
+    thetas.mle[index-2,,i] <- estimates
+  
+  }
+  
+ # print(i)
+  
+}
+
+
+# Signal To Noise Ratio: var.eta/var.vareps
+df.50 <- as.data.frame(thetas.mle[,,1])  %>% 
+  mutate(trueq = q[var.index]/var.vareps) %>%
+  mutate(q = V2^2/V1^2) 
+  
+df.100 <- as.data.frame(thetas.mle[,,2])  %>% 
+  mutate(trueq = q[var.index]/var.vareps) %>%
+  mutate(q = V2^2/V1^2)
+
+df.200 <- as.data.frame(thetas.mle[,,3])  %>% 
+  mutate(trueq = q[var.index]/var.vareps) %>%
+  mutate(q = V2^2/V1^2) 
+
+df.1000 <- as.data.frame(thetas.mle[,,4])  %>% 
+  mutate(trueq = q[var.index]/var.vareps) %>%
+  mutate(q = V2^2/V1^2) 
+
+
+m <- ggplot() +
+  geom_density(data = df.1000, aes(x=q, color = 'n=1000')) +
+  geom_density(data = df.200, aes(x=q, color = 'n=200')) +
+  geom_density(data = df.100, aes(x=q,color = 'n=100')) +
+  geom_density(data = df.50, aes(x=q,color = 'n=50')) + xlim(c(0,0.008))
+data.plot <- ggplot_build(m)  
+
+plot.df.1000 <- data.frame(x=data.plot$data[[1]]$x,y=data.plot$data[[1]]$y)
+plot.df.200 <- data.frame(x=data.plot$data[[2]]$x,y=data.plot$data[[2]]$y)
+plot.df.100 <- data.frame(x=data.plot$data[[3]]$x,y=data.plot$data[[3]]$y)
+plot.df.50 <- data.frame(x=data.plot$data[[4]]$x,y=data.plot$data[[4]]$y)
+
+
+fig <- plot_ly(x = ~plot.df.1000$x, y = ~plot.df.1000$y, type = 'scatter', mode = 'lines', name = 'T=1000',
+        line = list(color = "#6F4E7C") ,fill = 'tozeroy' , fillcolor= list(color = "#6F4E7C") )
+fig <- fig %>% add_trace(x = ~plot.df.200$x, y = ~plot.df.200$y, name = 'T=200',line = list(color = "#CA472F"))
+fig <- fig %>% add_trace(x = ~plot.df.100$x, y = ~plot.df.100$y, name = 'T=100',line = list(color = "#0B84A5"))
+fig <- fig %>% add_trace(x = ~plot.df.50$x, y = ~plot.df.50$y, name = 'T=50',line = list(color = "#F6C85F"))
+fig <- fig %>% layout(title = "Distribution of Signal-to-Noise Ratio by MLE", xaxis = list(title = 'q = 0.001'),
+         yaxis = list(title = 'Density')) 
+fig <- fig %>%
+  layout(shapes = list(vline(0.001)))
+
+figures[4] <- fig
+
+```
+
+```{r}
+fig
+```
+
+
+## Pile-up Problem
+
+Looking at the figures of the signal-to-noise ratio distribution, we observe a left-skewed distribution of the estimates, especially when the signal-to-noise ratio is small (and the time dimension $T$ is very limited). This pile-up of estimates at zero when using maximum likelihood to estimate a small parameter is well documented in the literature (@kim2020trend, @stock1994unit, @stock1998median).
+
