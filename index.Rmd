@@ -1,6 +1,6 @@
 ---
 title: Local Level Model
-author: admin
+author: 'Elio Bolliger'
 date: '2021-07-01'
 summary: 'In this short project, we present some exercices regarding the Local Level Model. We apply the Kalman filter to simulated data and illustarte the pile-up problem that may occur for maximum likelihood estimation and small sample size.'
 slug: []
