@@ -58,8 +58,7 @@ if (!require("htmltools")) {install.packages("htmltools"); library('htmltools')}
 
 # Preliminaries
 
-Please note that the plots are displayed without any problem in Safari, but with certain browsers and editions of chrome, firefox and edge plots might appear empty.
-
+Note that all code is available on [my Github repository](https://github.com/Elio-Rico/local-level-model).
 
 In this short project, we will apply and discuss some properties of the local level model. First, we use simulated time series to apply the Kalman Filter. Second, we discuss the properties of the Maximum Likelihood Estimator (MLE) in a small Monte Carlo simulation exercise. Within this framework, we will also analyze the pile-up problem of the MLE estimator.
 
